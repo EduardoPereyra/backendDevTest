@@ -1,33 +1,117 @@
-# Backend dev technical test
-We want to offer a new feature to our customers showing similar products to the one they are currently seeing. To do this we agreed with our front-end applications to create a new REST API operation that will provide them the product detail of the similar products for a given one. [Here](./similarProducts.yaml) is the contract we agreed.
+# Backend developer test — Similar Products
 
-We already have an endpoint that provides the product Ids similar for a given one. We also have another endpoint that returns the product detail by product Id. [Here](./existingApis.yaml) is the documentation of the existing APIs.
+Spring Boot implementation of the `GET /product/{productId}/similar` contract
+defined in [`similarProducts.yaml`](./similarProducts.yaml).
 
-**Create a Spring boot application that exposes the agreed REST API on port 5000.**
+## Requirements
 
-![Diagram](./assets/diagram.jpg "Diagram")
+- Java 21+
+- Docker Compose for the supplied mocks and load test
 
-Note that _Test_ and _Mocks_ components are given, you must only implement _yourApp_.
+Maven does not need to be installed; the repository includes Maven Wrapper.
 
-## Testing and Self-evaluation
-You can run the same test we will put through your application. You just need to have docker installed.
+## Run locally
 
-First of all, you may need to enable file sharing for the `shared` folder on your docker dashboard -> settings -> resources -> file sharing.
+Start the supplied dependencies:
 
-Then you can start the mocks and other needed infrastructure with the following command.
+```bash
+docker compose up -d simulado influxdb grafana
 ```
-docker-compose up -d simulado influxdb grafana
-```
-Check that mocks are working with a sample request to [http://localhost:3001/product/1/similarids](http://localhost:3001/product/1/similarids).
 
-To execute the test run:
-```
-docker-compose run --rm k6 run scripts/test.js
-```
-Browse [http://localhost:3000/d/Le2Ku9NMk/k6-performance-test](http://localhost:3000/d/Le2Ku9NMk/k6-performance-test) to view the results.
+Start the application:
 
-## Evaluation
-The following topics will be considered:
-- Code clarity and maintainability
-- Performance
-- Resilience
+```bash
+./mvnw spring-boot:run
+```
+
+The API is exposed on port `5000`:
+
+```bash
+curl http://localhost:5000/product/1/similar
+```
+
+Expected response:
+
+```json
+[
+  {"id":"2","name":"Dress","price":19.99,"availability":true},
+  {"id":"3","name":"Blazer","price":29.99,"availability":false},
+  {"id":"4","name":"Boots","price":39.99,"availability":true}
+]
+```
+
+## Run with Docker
+
+```bash
+docker build -t similar-products .
+docker run --rm \
+  -p 5000:5000 \
+  -e PRODUCTS_API_BASE_URL=http://host.docker.internal:3001 \
+  similar-products
+```
+
+## Tests
+
+Run unit and integration tests:
+
+```bash
+./mvnw verify
+```
+
+Run the supplied load test while the application is running:
+
+```bash
+docker compose run --rm k6 run scripts/test.js
+```
+
+The supplied Grafana dashboard is available at
+<http://localhost:3000/d/Le2Ku9NMk/k6-performance-test>.
+
+## Design
+
+The implementation follows a ports-and-adapters structure:
+
+- `api`: HTTP contract and error responses.
+- `application`: use case orchestration and the outbound port.
+- `domain`: product model.
+- `infrastructure`: non-blocking HTTP client and connection configuration.
+
+`WebClient` keeps the full request path non-blocking. Product details are fetched
+concurrently with a configurable upper bound, while `flatMapSequential` preserves
+the similarity order required by the OpenAPI contract.
+
+The HTTP connection pool and all relevant timeouts are explicit and configurable.
+This prevents slow or unavailable dependencies from consuming resources
+indefinitely under load.
+
+Responses from the dependency are validated before reaching the public API.
+Empty bodies, duplicate or blank IDs, and incomplete product details fail as
+upstream errors instead of producing a response that violates the public contract.
+
+## Error policy
+
+The public contract only defines `200` and `404`. For upstream infrastructure
+failures, this implementation also uses standard gateway responses:
+
+| Upstream outcome | API response |
+|---|---:|
+| Successful response | `200 OK` |
+| Any required product is missing | `404 Not Found` |
+| Upstream returns another error | `502 Bad Gateway` |
+| Upstream exceeds the response timeout | `504 Gateway Timeout` |
+| Upstream cannot be reached | `502 Bad Gateway` |
+
+No automatic retry is applied. Retrying read calls can be useful in production,
+but without an agreed retry budget it would amplify load against the supplied
+dependency during an outage.
+
+## Configuration
+
+The defaults are in [`src/main/resources/application.yml`](src/main/resources/application.yml).
+The upstream URL can be overridden with:
+
+```bash
+PRODUCTS_API_BASE_URL=http://localhost:3001
+```
+
+Actuator health, info and metrics endpoints are exposed below `/actuator`.
