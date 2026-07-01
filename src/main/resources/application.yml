@@ -7,6 +7,10 @@ spring:
 
 similar-products:
   detail-concurrency: 8
+  cache:
+    enabled: true
+    ttl: 5m
+    max-size: 10000
 
 management:
   endpoints:

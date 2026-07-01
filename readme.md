@@ -84,6 +84,13 @@ The HTTP connection pool and all relevant timeouts are explicit and configurable
 This prevents slow or unavailable dependencies from consuming resources
 indefinitely under load.
 
+The outbound products gateway is wrapped with an in-memory Caffeine cache. Both
+similar ID lists and product details are cached, so repeated requests do not keep
+hitting the supplied dependency for the same data. The cache also shares in-flight
+requests for the same key, which avoids a thundering herd when many users request
+the same product at once. Failed calls are not cached, allowing the application to
+recover as soon as the dependency becomes healthy again.
+
 Responses from the dependency are validated before reaching the public API.
 Empty bodies, duplicate or blank IDs, and incomplete product details fail as
 upstream errors instead of producing a response that violates the public contract.
@@ -112,6 +119,16 @@ The upstream URL can be overridden with:
 
 ```bash
 PRODUCTS_API_BASE_URL=http://localhost:3001
+```
+
+Cache behaviour can be tuned in `application.yml`:
+
+```yaml
+similar-products:
+  cache:
+    enabled: true
+    ttl: 5m
+    max-size: 10000
 ```
 
 Actuator health, info and metrics endpoints are exposed below `/actuator`.

@@ -145,6 +145,42 @@ class SimilarProductsApiIT {
     }
 
     @Test
+    void cachesRepeatedRequestsToTheSameProduct() throws InterruptedException {
+        respondWithJson("/product/21/similarids", "[\"22\",\"23\"]");
+        respondWithJson("/product/22", """
+                {"id":"22","name":"Cached dress","price":19.99,"availability":true}
+                """);
+        respondWithJson("/product/23", """
+                {"id":"23","name":"Cached blazer","price":29.99,"availability":false}
+                """);
+
+        webTestClient.get()
+                .uri("/product/21/similar")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$[0].id").isEqualTo("22")
+                .jsonPath("$[1].id").isEqualTo("23");
+
+        assertThat(receivedPaths(3))
+                .containsExactlyInAnyOrder(
+                        "/product/21/similarids",
+                        "/product/22",
+                        "/product/23"
+                );
+
+        webTestClient.get()
+                .uri("/product/21/similar")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$[0].id").isEqualTo("22")
+                .jsonPath("$[1].id").isEqualTo("23");
+
+        assertNoRequestReceived();
+    }
+
+    @Test
     void mapsSimilarIdsFailureToBadGateway() {
         RESPONSES.put("/product/8/similarids", new MockResponse().setResponseCode(503));
 
@@ -243,5 +279,9 @@ class SimilarProductsApiIT {
             paths.add(request.getPath());
         }
         return paths;
+    }
+
+    private static void assertNoRequestReceived() throws InterruptedException {
+        assertThat(PRODUCTS_API.takeRequest(200, TimeUnit.MILLISECONDS)).isNull();
     }
 }
