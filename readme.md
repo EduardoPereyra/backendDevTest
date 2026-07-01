@@ -131,4 +131,4 @@ similar-products:
     max-size: 10000
 ```
 
-Actuator health, info and metrics endpoints are exposed below `/actuator`.
+Actuator health and info endpoints are exposed below `/actuator`.
